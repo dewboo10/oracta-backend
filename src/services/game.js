@@ -45,6 +45,8 @@ function applyPurchase(user, itemId) {
   const item = config.STORE_ITEMS.find(x => x.id === itemId)
   if (!item) return { ok: false, error: 'Unknown item' }
 
+
+  if (!user.purchased) user.purchased = []
   if (!user.purchased.includes(itemId)) {
     user.purchased.push(itemId)
   }
@@ -52,20 +54,20 @@ function applyPurchase(user, itemId) {
   // OCT chest
   if (item.octReward) {
     user.balance    += item.octReward
-    user.totalMined += item.octReward
+    user.total_mined += item.octReward
   }
 
   // Auto-mine
   if (item.autoMineHours) {
     if (item.autoMineHours === Infinity) {
-      user.autoMineUntil = Infinity
+      user.auto_mine_until = Infinity
     } else {
       const untilMs = Date.now() + item.autoMineHours * 3600 * 1000
       // Extend if already active
-      if (user.autoMineUntil && user.autoMineUntil !== Infinity && user.autoMineUntil > Date.now()) {
-        user.autoMineUntil = user.autoMineUntil + item.autoMineHours * 3600 * 1000
+      if (user.auto_mine_until && user.auto_mine_until !== Infinity && user.auto_mine_until > Date.now()) {
+        user.auto_mine_until = user.auto_mine_until + item.autoMineHours * 3600 * 1000
       } else {
-        user.autoMineUntil = untilMs
+        user.auto_mine_until = untilMs
       }
     }
   }
@@ -82,7 +84,7 @@ function syncSession(user, { balance, totalMined, blocks, upgrades, sessE, sessT
 
   // Sanity: sessE should not exceed theoretical max
   const clampedSessE = Math.min(sessE || 0, maxEarned + 50000)
-  
+
  if (typeof balance    === 'number') user.balance     = Math.max(user.balance || 0, balance)
 if (typeof totalMined === 'number') user.total_mined = Math.max(user.total_mined || 0, totalMined)
 if (typeof blocks     === 'number') user.blocks      = Math.max(user.blocks || 0, blocks)
@@ -144,21 +146,22 @@ function updateStreak(user) {
 /* ── Referral ── */
  async function applyReferral(newUser, referralCode) {
     const allUsers = await db.getAllUsers()  // ← added await
-  const referrer = db.getAllUsers().find(u => u.referralCode === referralCode)
+  const referrer = allUsers.find(u => u.referral_code === referralCode)  // use allUsers + snake_case
+
   if (!referrer)               return { ok: false, error: 'Invalid code' }
   if (referrer.id === newUser.id) return { ok: false, error: 'Self-referral' }
-  if (newUser.referredBy)      return { ok: false, error: 'Already referred' }
+  if (newUser.referred_by)      return { ok: false, error: 'Already referred' }
 
-  newUser.referredBy = referrer.id
+  newUser.referred_by = referrer.id
   referrer.refs      = (referrer.refs || 0) + 1
 
   // Bonus for both
   const newUserBonus  = 5000
   const referrerBonus = 5000
   newUser.balance    += newUserBonus
-  newUser.totalMined += newUserBonus
+  newUser.total_mined += newUserBonus
   referrer.balance   += referrerBonus
-  referrer.totalMined+= referrerBonus
+  referrer.total_mined+= referrerBonus
 
   return {
     ok:           true,
@@ -177,13 +180,13 @@ async function processAutoMine() {
 
    const allUsers = await db.getAllUsers()  // ← added await
   allUsers.forEach(user => {              // ← now forEach works
-    if (!user.autoMineUntil) return
-    if (user.autoMineUntil !== Infinity && user.autoMineUntil <= now) return
+    if (!user.auto_mine_until) return
+    if (user.auto_mine_until !== Infinity && user.auto_mine_until <= now) return
 
     const rate = calcRate(user.upgrades) * 2
     const earned = rate * 60
     user.balance += earned
-    user.totalMined += earned
+    user.total_mined += earned
     processed++
   })
 
