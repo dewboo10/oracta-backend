@@ -82,12 +82,12 @@ function syncSession(user, { balance, totalMined, blocks, upgrades, sessE, sessT
 
   // Sanity: sessE should not exceed theoretical max
   const clampedSessE = Math.min(sessE || 0, maxEarned + 50000)
-
+  
  if (typeof balance    === 'number') user.balance     = Math.max(user.balance || 0, balance)
 if (typeof totalMined === 'number') user.total_mined = Math.max(user.total_mined || 0, totalMined)
 if (typeof blocks     === 'number') user.blocks      = Math.max(user.blocks || 0, blocks)
 if (upgrades)                       user.upgrades    = upgrades
- 
+
   return { ok: true, user, clampedSessE }
 }
 
