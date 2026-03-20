@@ -152,8 +152,9 @@ router.get('/referrals',  async (req, res) => {
  * Returns: { sessionId }
  */
 router.post('/session/start', async (req, res) => {
-  const session = await db.createSession(req.userId)
-  res.json({ ok: true, sessionId: session.id })
+   const session = await db.createSession(req.userId)
+   if (!session) return res.status(500).json({ error: 'Failed to create session' })
+   res.json({ ok: true, sessionId: session.id })
 })
 
 /**
