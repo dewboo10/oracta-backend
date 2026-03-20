@@ -83,11 +83,11 @@ function syncSession(user, { balance, totalMined, blocks, upgrades, sessE, sessT
   // Sanity: sessE should not exceed theoretical max
   const clampedSessE = Math.min(sessE || 0, maxEarned + 50000)
 
-  if (typeof balance    === 'number') user.balance    = Math.max(user.balance, balance)
-  if (typeof totalMined === 'number') user.totalMined = Math.max(user.totalMined, totalMined)
-  if (typeof blocks     === 'number') user.blocks     = Math.max(user.blocks, blocks)
-  if (upgrades)                       user.upgrades   = upgrades
-
+ if (typeof balance    === 'number') user.balance     = Math.max(user.balance || 0, balance)
+if (typeof totalMined === 'number') user.total_mined = Math.max(user.total_mined || 0, totalMined)
+if (typeof blocks     === 'number') user.blocks      = Math.max(user.blocks || 0, blocks)
+if (upgrades)                       user.upgrades    = upgrades
+ 
   return { ok: true, user, clampedSessE }
 }
 
@@ -142,7 +142,8 @@ function updateStreak(user) {
 }
 
 /* ── Referral ── */
-function applyReferral(newUser, referralCode) {
+ async function applyReferral(newUser, referralCode) {
+    const allUsers = await db.getAllUsers()  // ← added await
   const referrer = db.getAllUsers().find(u => u.referralCode === referralCode)
   if (!referrer)               return { ok: false, error: 'Invalid code' }
   if (referrer.id === newUser.id) return { ok: false, error: 'Self-referral' }
@@ -168,19 +169,20 @@ function applyReferral(newUser, referralCode) {
 }
 
 /* ── Auto-mine server-side tick ── */
-function processAutoMine() {
+async function processAutoMine() {
   // Called periodically to credit OCT to users with active auto-mine
   // In production this would run every minute via a cron job
   const now = Date.now()
   let processed = 0
 
-  db.getAllUsers().forEach(user => {
+   const allUsers = await db.getAllUsers()  // ← added await
+  allUsers.forEach(user => {              // ← now forEach works
     if (!user.autoMineUntil) return
     if (user.autoMineUntil !== Infinity && user.autoMineUntil <= now) return
 
-    const rate   = calcRate(user.upgrades) * 2  // 2× for auto-mine
-    const earned = rate * 60  // 1 minute worth
-    user.balance    += earned
+    const rate = calcRate(user.upgrades) * 2
+    const earned = rate * 60
+    user.balance += earned
     user.totalMined += earned
     processed++
   })

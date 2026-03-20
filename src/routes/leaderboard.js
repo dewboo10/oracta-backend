@@ -8,15 +8,16 @@ const { optionalAuth } = require('../middleware/auth')
  * Public — returns top miners.
  * If authenticated, includes caller's rank.
  */
-router.get('/', optionalAuth, (req, res) => {
+router.get('/', optionalAuth, async (req, res) => {
   const limit  = Math.min(parseInt(req.query.limit  || '100'), 500)
   const offset = parseInt(req.query.offset || '0')
 
-  const board = db.getLeaderboard(limit + offset).slice(offset, offset + limit)
-
+  const allBoard = await db.getLeaderboard(limit + offset)
+  const board = allBoard.slice(offset, offset + limit)  
   let myRank = null
+  
   if (req.userId) {
-    const allSorted = db.getLeaderboard(10000)
+    const allSorted = await db.getLeaderboard(10000)
     const idx = allSorted.findIndex(u => u.id === req.userId)
     if (idx !== -1) {
       myRank = {

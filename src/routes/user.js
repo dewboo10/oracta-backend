@@ -22,13 +22,20 @@ router.get('/profile', (req, res) => {
  * Called at end of a mining session or when app goes to background.
  * Syncs client state to server.
  */
-router.post('/sync', (req, res) => {
+router.post('/sync', async(req, res) => {
   const { balance, totalMined, blocks, upgrades, sessE, sessT } = req.body
   const result = game.syncSession(req.user, { balance, totalMined, blocks, upgrades, sessE, sessT })
 
   if (!result.ok) {
     return res.status(400).json({ ok: false, error: result.error })
   }
+
+    await db.updateUser(req.userId, {
+    balance:      req.user.balance,
+    total_mined:  req.user.totalMined,
+    blocks:       req.user.blocks,
+    upgrades:     req.user.upgrades,
+  })
 
   res.json({ ok: true, user: sanitizeUser(req.user) })
 })
@@ -39,7 +46,7 @@ router.post('/sync', (req, res) => {
  *
  * Purchases one level of an upgrade using OCT balance.
  */
-router.post('/upgrade', (req, res) => {
+router.post('/upgrade', async (req, res) => {
   const upgradeId = parseInt(req.body.upgradeId)
   if (!upgradeId) return res.status(400).json({ ok: false, error: 'upgradeId required' })
 
@@ -47,6 +54,11 @@ router.post('/upgrade', (req, res) => {
   if (!result.ok) {
     return res.status(400).json({ ok: false, error: result.error })
   }
+
+    await db.updateUser(req.userId, {
+    balance:  req.user.balance,
+    upgrades: req.user.upgrades,
+  })
 
   res.json({
     ok:         true,
@@ -63,7 +75,7 @@ router.post('/upgrade', (req, res) => {
  *
  * Claims a mission checkpoint reward.
  */
-router.post('/mission/claim', (req, res) => {
+router.post('/mission/claim', async (req, res) => {
   const { missionId, cpIndex } = req.body
   if (!missionId || cpIndex === undefined) {
     return res.status(400).json({ ok: false, error: 'missionId and cpIndex required' })
@@ -74,6 +86,13 @@ router.post('/mission/claim', (req, res) => {
     return res.status(400).json({ ok: false, error: result.error })
   }
 
+
+  await db.updateUser(req.userId, {
+    balance:  req.user.balance,
+    m_points: req.user.mPoints,
+    claimed:  req.user.claimed,
+  })
+  
   res.json({
     ok:         true,
     reward:     result.reward,
@@ -88,7 +107,7 @@ router.post('/mission/claim', (req, res) => {
  *
  * Applies a referral code (one-time, first login only).
  */
-router.post('/referral/apply', (req, res) => {
+router.post('/referral/apply', async (req, res) => {
   const { code } = req.body
   if (!code) return res.status(400).json({ ok: false, error: 'code required' })
 
@@ -96,6 +115,12 @@ router.post('/referral/apply', (req, res) => {
   if (!result.ok) {
     return res.status(400).json({ ok: false, error: result.error })
   }
+
+    await db.updateUser(req.userId, {
+    balance:     req.user.balance,
+    total_mined: req.user.totalMined,
+    referred_by: req.user.referredBy,
+  })
 
   res.json({
     ok:           true,
@@ -108,8 +133,8 @@ router.post('/referral/apply', (req, res) => {
  * GET /api/user/referrals
  * Returns the user's referred friends list.
  */
-router.get('/referrals', (req, res) => {
-  const friends = db.getAllUsers()
+router.get('/referrals',  async (req, res) => {
+  const friends = await db.getAllUsers()
     .filter(u => u.referredBy === req.userId)
     .map(u => ({
       id:         u.id,
@@ -126,8 +151,8 @@ router.get('/referrals', (req, res) => {
  * Registers start of a mining session.
  * Returns: { sessionId }
  */
-router.post('/session/start', (req, res) => {
-  const session = db.createSession(req.userId)
+router.post('/session/start', async (req, res) => {
+  const session = await db.createSession(req.userId)
   res.json({ ok: true, sessionId: session.id })
 })
 
@@ -136,11 +161,11 @@ router.post('/session/start', (req, res) => {
  * Body: { sessionId, earned, blocks }
  * Closes out a session, updates user playtime.
  */
-router.post('/session/end', (req, res) => {
+router.post('/session/end',  async (req, res) => {
   const { sessionId, earned, blocks } = req.body
   if (!sessionId) return res.status(400).json({ ok: false, error: 'sessionId required' })
 
-  const session = db.endSession(sessionId, earned || 0, blocks || 0)
+  const session = await db.endSession(sessionId, earned || 0, blocks || 0)
   if (!session) return res.status(404).json({ ok: false, error: 'Session not found' })
 
   res.json({ ok: true, session })

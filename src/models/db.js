@@ -1,60 +1,12 @@
-/**
- * ORACTA In-Memory Database
- * Stores all state in Maps. Persists to /data/*.json on disk.
- * Replace with PostgreSQL/MongoDB in production.
- */
+require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
 
-const fs   = require('fs')
-const path = require('path')
+const { createClient } = require('@supabase/supabase-js')
 const { v4: uuidv4 } = require('uuid')
-const config = require('../config')
 
-const DATA_DIR = path.join(process.cwd(), 'data')
-
-// Ensure data dir exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true })
-}
-
-/* ── Stores ── */
-const users     = new Map()  // userId -> UserRecord
-const sessions  = new Map()  // sessionId -> SessionRecord
-const purchases = new Map()  // purchaseId -> PurchaseRecord
-
-/* ── User schema ── */
-function createUser(telegramId, telegramData = {}) {
-  return {
-    id:            String(telegramId),
-    telegramId:    String(telegramId),
-    username:      telegramData.username    || null,
-    firstName:     telegramData.first_name  || 'Miner',
-    lastName:      telegramData.last_name   || null,
-    photoUrl:      telegramData.photo_url   || null,
-    languageCode:  telegramData.language_code || 'en',
-
-    // Game state
-    balance:       0,
-    totalMined:    0,
-    blocks:        0,
-    upgrades:      {},       // { upgradeId: level }
-    purchased:     [],       // array of item ids
-    autoMineUntil: null,     // timestamp ms | Infinity | null
-    refs:          0,
-    referredBy:    null,
-    referralCode:  generateReferralCode(telegramId),
-    mPoints:       0,        // mission points
-    claimed:       {},       // { missionId: [cpIndex, ...] }
-    streak:        0,
-    lastStreakDate: null,
-    achievements:  [],
-
-    // Meta
-    createdAt:     Date.now(),
-    lastSeen:      Date.now(),
-    totalSessions: 0,
-    totalPlaytime: 0,        // seconds
-  }
-}
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+)
 
 function generateReferralCode(seed) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -67,139 +19,170 @@ function generateReferralCode(seed) {
   return code
 }
 
-/* ── CRUD ── */
-function getUser(userId) {
-  return users.get(String(userId)) || null
+/* ── User ── */
+async function getUser(userId) {
+  const { data } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', String(userId))
+    .single()
+  return data || null
 }
 
-function getOrCreateUser(telegramId, telegramData = {}) {
+async function getOrCreateUser(telegramId, telegramData = {}) {
   const id = String(telegramId)
-  if (!users.has(id)) {
-    users.set(id, createUser(id, telegramData))
+  let { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', id)
+    .single()
+
+  if (!user) {
+    const newUser = {
+      id,
+      telegram_id:      id,
+      username:         telegramData.username    || null,
+      first_name:       telegramData.first_name  || 'Miner',
+      last_name:        telegramData.last_name   || null,
+      language_code:    telegramData.language_code || 'en',
+      balance:          0,
+      total_mined:      0,
+      blocks:           0,
+      upgrades:         {},
+      purchased:        [],
+      auto_mine_until:  null,
+      refs:             0,
+      referred_by:      null,
+      referral_code:    generateReferralCode(id),
+      m_points:         0,
+      claimed:          {},
+      streak:           0,
+      last_streak_date: null,
+      achievements:     [],
+      created_at:       Date.now(),
+      last_seen:        Date.now(),
+      total_sessions:   0,
+      total_playtime:   0,
+    }
+    const { data } = await supabase
+      .from('users')
+      .insert(newUser)
+      .select()
+      .single()
+    user = data
+  } else {
+    await supabase
+      .from('users')
+      .update({ last_seen: Date.now() })
+      .eq('id', id)
+    user.last_seen = Date.now()
   }
-  const user = users.get(id)
-  user.lastSeen = Date.now()
   return user
 }
 
-function updateUser(userId, updates) {
-  const user = users.get(String(userId))
-  if (!user) return null
-  Object.assign(user, updates)
-  return user
+async function updateUser(userId, updates) {
+  const { data } = await supabase
+    .from('users')
+    .update(updates)
+    .eq('id', String(userId))
+    .select()
+    .single()
+  return data
 }
 
-function getAllUsers() {
-  return [...users.values()]
+async function getAllUsers() {
+  const { data } = await supabase
+    .from('users')
+    .select('*')
+  return data || []
 }
 
-/* ── Session ── */
-function createSession(userId) {
-  const id = uuidv4()
-  sessions.set(id, {
-    id,
-    userId:    String(userId),
-    startedAt: Date.now(),
-    endedAt:   null,
-    earned:    0,
-    blocks:    0,
-  })
-  return sessions.get(id)
+/* ── Sessions ── */
+async function createSession(userId) {
+  const { data } = await supabase
+    .from('sessions')
+    .insert({
+      id:         uuidv4(),
+      user_id:    String(userId),
+      started_at: Date.now(),
+      ended_at:   null,
+      earned:     0,
+      blocks:     0,
+    })
+    .select()
+    .single()
+  return data
 }
 
-function endSession(sessionId, earned, blocks) {
-  const s = sessions.get(sessionId)
-  if (!s) return null
-  s.endedAt = Date.now()
-  s.earned  = earned
-  s.blocks  = blocks
-  const durationSec = Math.floor((s.endedAt - s.startedAt) / 1000)
+async function endSession(sessionId, earned, blocks) {
+  const { data: session } = await supabase
+    .from('sessions')
+    .update({ ended_at: Date.now(), earned, blocks })
+    .eq('id', sessionId)
+    .select()
+    .single()
 
-  const user = users.get(s.userId)
-  if (user) {
-    user.totalSessions++
-    user.totalPlaytime += durationSec
+  if (session) {
+    const durationSec = Math.floor((session.ended_at - session.started_at) / 1000)
+    const user = await getUser(session.user_id)
+    if (user) {
+      await updateUser(session.user_id, {
+        total_sessions: (user.total_sessions || 0) + 1,
+        total_playtime: (user.total_playtime || 0) + durationSec,
+      })
+    }
   }
-  return s
+  return session
 }
 
 /* ── Purchases ── */
-function recordPurchase(userId, itemId, stars, telegramPaymentChargeId = null) {
-  const id = uuidv4()
-  purchases.set(id, {
-    id,
-    userId:                  String(userId),
-    itemId,
-    stars,
-    telegramPaymentChargeId,
-    createdAt:               Date.now(),
-  })
-  return purchases.get(id)
+async function recordPurchase(userId, itemId, stars, telegramPaymentChargeId = null) {
+  const { data } = await supabase
+    .from('purchases')
+    .insert({
+      id:                        uuidv4(),
+      user_id:                   String(userId),
+      item_id:                   itemId,
+      stars,
+      telegram_payment_charge_id: telegramPaymentChargeId,
+      created_at:                Date.now(),
+    })
+    .select()
+    .single()
+  return data
 }
 
-function getUserPurchases(userId) {
-  return [...purchases.values()].filter(p => p.userId === String(userId))
+async function getUserPurchases(userId) {
+  const { data } = await supabase
+    .from('purchases')
+    .select('*')
+    .eq('user_id', String(userId))
+  return data || []
 }
 
 /* ── Leaderboard ── */
-function getLeaderboard(limit = 100) {
-  return getAllUsers()
-    .sort((a, b) => b.totalMined - a.totalMined)
-    .slice(0, limit)
-    .map((u, i) => ({
-      rank:        i + 1,
-      id:          u.id,
-      username:    u.username || u.firstName,
-      totalMined:  u.totalMined,
-      blocks:      u.blocks,
-      autoMining:  u.autoMineUntil
-        ? (u.autoMineUntil === Infinity || u.autoMineUntil > Date.now())
-        : false,
-    }))
+async function getLeaderboard(limit = 100) {
+  const { data } = await supabase
+    .from('users')
+    .select('*')
+    .order('total_mined', { ascending: false })
+    .limit(limit)
+
+  return (data || []).map((u, i) => ({
+    rank:       i + 1,
+    id:         u.id,
+    username:   u.username || u.first_name,
+    totalMined: u.total_mined,
+    blocks:     u.blocks,
+    autoMining: u.auto_mine_until
+      ? (u.auto_mine_until === -1 || u.auto_mine_until > Date.now())
+      : false,
+  }))
 }
 
-/* ── Persistence ── */
-function save() {
-  try {
-    fs.writeFileSync(
-      path.join(DATA_DIR, 'users.json'),
-      JSON.stringify([...users.entries()], null, 2)
-    )
-    fs.writeFileSync(
-      path.join(DATA_DIR, 'purchases.json'),
-      JSON.stringify([...purchases.entries()], null, 2)
-    )
-  } catch (e) {
-    console.error('[DB] Save error:', e.message)
-  }
-}
-
-function load() {
-  try {
-    const usersFile = path.join(DATA_DIR, 'users.json')
-    if (fs.existsSync(usersFile)) {
-      const data = JSON.parse(fs.readFileSync(usersFile, 'utf8'))
-      data.forEach(([k, v]) => users.set(k, v))
-      console.log(`[DB] Loaded ${users.size} users`)
-    }
-    const purchasesFile = path.join(DATA_DIR, 'purchases.json')
-    if (fs.existsSync(purchasesFile)) {
-      const data = JSON.parse(fs.readFileSync(purchasesFile, 'utf8'))
-      data.forEach(([k, v]) => purchases.set(k, v))
-      console.log(`[DB] Loaded ${purchases.size} purchases`)
-    }
-  } catch (e) {
-    console.error('[DB] Load error:', e.message)
-  }
-}
-
-// Auto-persist
-setInterval(save, config.PERSIST_INTERVAL_MS)
-process.on('SIGINT',  () => { save(); process.exit(0) })
-process.on('SIGTERM', () => { save(); process.exit(0) })
-
-// Load on boot
-load()
+/* ── No-op save/load (Supabase handles persistence) ── */
+function save() {}
+function load() {}
 
 module.exports = {
   getUser,

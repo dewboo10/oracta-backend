@@ -122,29 +122,34 @@ router.post('/invoice', requireAuth, purchaseLimiter, async (req, res) => {
  * Called after a successful Telegram Stars payment.
  * In production, verify the payment via Telegram's API before crediting.
  */
-router.post('/confirm', requireAuth, purchaseLimiter, (req, res) => {
+router.post('/confirm', requireAuth, purchaseLimiter, async (req, res) => {
   const { itemId, telegramPaymentChargeId, stars } = req.body
   if (!itemId) return res.status(400).json({ ok: false, error: 'itemId required' })
 
   const catalogItem = config.STORE_ITEMS.find(x => x.id === itemId)
-  if (!catalogItem)  return res.status(404).json({ ok: false, error: 'Item not found' })
+  if (!catalogItem) return res.status(404).json({ ok: false, error: 'Item not found' })
 
-  // In production: verify telegramPaymentChargeId with Telegram Bot API
-  // For now: trust in dev, require in production
   if (!config.IS_DEV && !telegramPaymentChargeId) {
     return res.status(400).json({ ok: false, error: 'Payment charge ID required' })
   }
 
-  // Record purchase
-  db.recordPurchase(req.userId, itemId, catalogItem.stars, telegramPaymentChargeId)
+  // Fix: ensure purchased array exists
+  if (!req.user.purchased) req.user.purchased = []
 
-  // Apply to game state
+  await db.recordPurchase(req.userId, itemId, catalogItem.stars, telegramPaymentChargeId)
+
   const result = game.applyPurchase(req.user, itemId)
-  if (!result.ok) {
-    return res.status(400).json({ ok: false, error: result.error })
-  }
+  if (!result.ok) return res.status(400).json({ ok: false, error: result.error })
+
+  await db.updateUser(req.userId, {
+    balance:         req.user.balance,
+    total_mined:     req.user.total_mined,
+    purchased:       req.user.purchased,
+    auto_mine_until: req.user.auto_mine_until,
+  })
 
   console.log(`[Purchase] User ${req.userId} bought ${itemId} for ${catalogItem.stars} Stars`)
+
 
   res.json({
     ok:       true,
@@ -159,8 +164,8 @@ router.post('/confirm', requireAuth, purchaseLimiter, (req, res) => {
  * Auth: required
  * Returns the authenticated user's purchase history.
  */
-router.get('/purchases', requireAuth, (req, res) => {
-  const history = db.getUserPurchases(req.userId)
+router.get('/purchases', requireAuth, async (req, res) => {
+  const history = await db.getUserPurchases(req.userId)
   res.json({ ok: true, purchases: history })
 })
 
@@ -202,7 +207,7 @@ router.post('/webhook', async (req, res) => {
     const userId  = String(update.message.from.id)
     console.log(`[Webhook] successful_payment from ${userId}: ${payment.invoice_payload} (${payment.total_amount} stars)`)
 
-    const user = db.getOrCreateUser(userId)
+   const user = await db.getOrCreateUser(userId)
     const verification = telegram.verifyStarsPayment({
       currency:                    payment.currency,
       total_amount:                payment.total_amount,
