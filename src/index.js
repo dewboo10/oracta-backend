@@ -40,14 +40,16 @@ app.use(helmet({
 /* ─────────────────────────────────────────────────────────────
    CORS
 ───────────────────────────────────────────────────────────── */
+app.set('trust proxy', 1)
+
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (curl, Telegram WebView, etc.)
     if (!origin) return callback(null, true)
     const allowed = [
       ...config.CORS_ORIGINS,
       'https://web.telegram.org',
       'https://telegram.org',
+      'https://brilliant-narwhal-4558e0.netlify.app',
     ]
     if (config.IS_DEV || allowed.includes(origin)) {
       return callback(null, true)
@@ -58,7 +60,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type','Authorization'],
   credentials:    true,
 }))
-
 /* ─────────────────────────────────────────────────────────────
    Body parsing & logging
 ───────────────────────────────────────────────────────────── */
